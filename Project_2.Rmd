@@ -12,10 +12,8 @@ knitr::opts_chunk$set(echo = TRUE)
 ### Loading Packages
 
 ```{r}
-library(readxl)
 library(readr)
 library(dplyr)
-library(Hmisc)
 library(mice)
 ```
 
@@ -45,38 +43,77 @@ sapply(tb2, is.character)
 It seems like Brand Code is the only non-numeric value. If the goal is to impute missing values, we could impute missing values using knn (for brand code). I also want to look at what the size of the resulting data set will be if I just apply a remove NA logic.
 
 ```{r}
-print(nrow(na.omit(tb2)))
+print(nrow(na.omit(tb2))/nrow(tb2) * 100)
 ```
 
-Removing all NA values leaves us with about 80% of the original data set, which is not so bad until you consider that the prediction data set may have missing NA values and if we end up choosing a variable in the modeling phase with missing NAs in the prediction set, that sets us up for a level of inconsistency. It might just make sense to impute missing values and to do this I will use the mice() function from the mice package. Though before I do this, I want to understand the nature of missingness and the nature of my variables with missing values (most variables).
+Removing all NA values leaves us with about 79% of the original data set, which is not so bad until you consider that the prediction data set may have missing NA values and if we end up choosing a variable in the modeling phase with missing NAs in the prediction set, that sets us up for a level of inconsistency. It might just make sense to impute missing values and to do this I will use the mice() function from the mice package. Though before I do this, I want to understand the nature of missingness and the nature of my variables with missing values (most variables). I'll start by checking the variables individually as there might be a reason to exclude an individual variable due to a large amount of missingness.
 
 ```{r}
-install.packages('visdat')
-library(visdat)
-vis_miss(tb2)
+# Calculate percentage of missing values for each variable
+percent_missing <- colMeans(is.na(tb2)) * 100
+
+# Create a dataframe to display results
+missing_summary <- data.frame(
+  variable = names(percent_missing),
+  percent_missing = percent_missing
+)
+
+print(missing_summary %>% select(percent_missing) %>% arrange(desc(percent_missing)) %>% head())
 ```
+
+It does not seem that any individual variable has a significant amount of missingness. The variable with the largest amount of missingness, by far, is MFR and is only missing about 8% of its data.
+
+Now, I want to check the distributions of my variables (to assess for normality).
+
+```{r}
+numeric_cols <- sapply(tb2, is.numeric)
+df_numeric <- tb2[, numeric_cols]
+
+for (col in names(df_numeric)) {
+  qqnorm(df_numeric[[col]], main = paste("QQ Plot of", col))
+  qqline(df_numeric[[col]], col = 2)  # Adds a line to the QQ plot
+}
+```
+
+Based on the qqplots, it seems that some variables would benefit from imputation that follows a normal regression and some would be best served by a pmm imputation.
 
 ### Imputing Data
 
 ```{r}
-# Convert factor column to factor (if necessary)
+# Assuming tb2 and tb3 are your original datasets
+# Convert factor column to factor in tb2 and tb3 (if necessary)
 tb2$Brand_Code <- as.factor(tb2$Brand_Code)
+tb3$Brand_Code <- as.factor(tb3$Brand_Code)
 
-# Specify method for each variable type
-imputed_data <- mice(data = tb2, m = 1, method = 'pmm', seed = 500)
+# Add dataset indicator column
+tb2$dataset <- "train"
+tb3$dataset <- "test"
 
-# Final Imputations
-df_train = complete(imputed_data, 1)
+# Combine datasets
+combined_data <- rbind(tb2, tb3)
 
-test_imputed <- mice(tb3, m = 1, method = imputed_data$method, seed = 500, 
-                     predictorMatrix = imputed_data$predictorMatrix, 
-                     visitSequence = imputed_data$visitSequence, 
-                     form = imputed_data$form)
+# Define columns for norm imputation and others for pmm
+norm_reg_cols <- c('Carb_Volume', 'Fill_Ounces', 'PC_Volume', 'Carb_Pressure', 'Carb_Temp', 'Carb_Pressure1', 'PH')
+pmm_cols <- setdiff(names(combined_data), norm_reg_cols)
 
-# Get the completed test data (only one dataset is generated here)
-df_test <- complete(test_imputed, 1)
+# Specify blocks for imputation
+blocks <- list(
+  norm = norm_reg_cols,
+  pmm = pmm_cols
+)
 
-df_test
+# Perform mice imputation on combined_data
+imputed_data <- mice(data = combined_data, m = 1, method = c('norm', 'pmm'), blocks = blocks, seed = 500)
+
+# Impute and split data back into tb2 (train) and tb3 (test)
+df_train <- complete(imputed_data, action = "long", include = FALSE)[combined_data$dataset == "train", ]
+df_test <- complete(imputed_data, action = "long", include = FALSE)[combined_data$dataset == "test", ]
+
+df_train <- df_train %>%
+  select(-dataset)
+
+df_test <- df_test %>%
+  select(-dataset)
 ```
 
-
+I combined the two datasets for imputation purposes, though I did specify which rows corresponded to which dataset, so that I could easily then separate the data after imputation. I then employed normal regression or pmm depending on the my assumptions of normality for a given variable based on a variable's qqplot.
