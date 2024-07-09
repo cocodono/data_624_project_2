@@ -62,16 +62,21 @@ vis_miss(tb2)
 # Convert factor column to factor (if necessary)
 tb2$Brand_Code <- as.factor(tb2$Brand_Code)
 
-blocks = list( numeric = setdiff(colnames(tb2), 'Brand_Code'),
-               factor = c('Brand_Code'))
-
 # Specify method for each variable type
-imputed_data <- mice(data = tb2, m = 5, method = c("norm", "pmm"), blocks = blocks)
+imputed_data <- mice(data = tb2, m = 1, method = 'pmm', seed = 500)
 
 # Final Imputations
-df_1 = complete(imputed_data, 1)
-df_2 = complete(imputed_data, 2)
-df_3 = complete(imputed_data, 3)
-df_4 = complete(imputed_data, 4)
-df_5 = complete(imputed_data, 5)
+df_train = complete(imputed_data, 1)
+
+test_imputed <- mice(tb3, m = 1, method = imputed_data$method, seed = 500, 
+                     predictorMatrix = imputed_data$predictorMatrix, 
+                     visitSequence = imputed_data$visitSequence, 
+                     form = imputed_data$form)
+
+# Get the completed test data (only one dataset is generated here)
+df_test <- complete(test_imputed, 1)
+
+df_test
 ```
+
+
