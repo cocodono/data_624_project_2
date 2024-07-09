@@ -9,6 +9,69 @@ output: html_document
 knitr::opts_chunk$set(echo = TRUE)
 ```
 
+### Loading Packages
 
+```{r}
+library(readxl)
+library(readr)
+library(dplyr)
+library(Hmisc)
+library(mice)
+```
 
+### Loading Data
 
+```{r}
+tb1 <- read_excel("Copy of Data Columns, Types.xlsx")
+tb2 = read_csv('StudentData - TO MODEL.csv')
+
+colnames(tb2) = gsub(" ", "_", colnames(tb2))
+
+tb3 = read_csv('StudentEvaluation- TO PREDICT.csv')
+
+colnames(tb3) = gsub(" ", "_", colnames(tb3))
+```
+
+For whatever reason, "StudentData - TO MODEL.xlsx" was being read incorrectly, so I exported the file to csv and read it that way. I chose to read "StudentEvaluation- TOPREDICT.xslx" as a csv for good measure. I did not see a need to export and reread the info file as that file was not impacted. There were ways to specify that certain columns should be read in specific ways; however, the ways in which I tried to specify the columns did not show any improvements.
+
+After running through this process, I realized that NAs were imputed with zeroes, which was not ideal as some there were already zeroes as non-NA values in at least some of the columns. I manually uploaded the data to google sheets and exported through google sheets. This manual process seemed to solve for data quality issues.
+
+### Data Exploration
+
+```{r}
+sapply(tb2, is.character)
+```
+
+It seems like Brand Code is the only non-numeric value. If the goal is to impute missing values, we could impute missing values using knn (for brand code). I also want to look at what the size of the resulting data set will be if I just apply a remove NA logic.
+
+```{r}
+print(nrow(na.omit(tb2)))
+```
+
+Removing all NA values leaves us with about 80% of the original data set, which is not so bad until you consider that the prediction data set may have missing NA values and if we end up choosing a variable in the modeling phase with missing NAs in the prediction set, that sets us up for a level of inconsistency. It might just make sense to impute missing values and to do this I will use the mice() function from the mice package. Though before I do this, I want to understand the nature of missingness and the nature of my variables with missing values (most variables).
+
+```{r}
+install.packages('visdat')
+library(visdat)
+vis_miss(tb2)
+```
+
+### Imputing Data
+
+```{r}
+# Convert factor column to factor (if necessary)
+tb2$Brand_Code <- as.factor(tb2$Brand_Code)
+
+blocks = list( numeric = setdiff(colnames(tb2), 'Brand_Code'),
+               factor = c('Brand_Code'))
+
+# Specify method for each variable type
+imputed_data <- mice(data = tb2, m = 5, method = c("norm", "pmm"), blocks = blocks)
+
+# Final Imputations
+df_1 = complete(imputed_data, 1)
+df_2 = complete(imputed_data, 2)
+df_3 = complete(imputed_data, 3)
+df_4 = complete(imputed_data, 4)
+df_5 = complete(imputed_data, 5)
+```
